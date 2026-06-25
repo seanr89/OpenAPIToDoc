@@ -1,0 +1,467 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi.Readers;
+using OfficeIMO.Word;
+using OfficeIMO.Drawing;
+
+namespace OpenAPIToDocConsole
+{
+    public static class OpenApiToDocGenerator
+    {
+        private class FlatProperty
+        {
+            public string Name { get; set; } = "";
+            public string Type { get; set; } = "";
+            public bool Required { get; set; }
+            public string Description { get; set; } = "";
+        }
+
+        public static void GenerateWordDoc(string openApiJsonPath, string outputWordPath)
+        {
+            if (!File.Exists(openApiJsonPath))
+            {
+                throw new FileNotFoundException("The specified OpenAPI JSON file could not be found.", openApiJsonPath);
+            }
+
+            Console.WriteLine($"Reading and parsing OpenAPI specification from: {openApiJsonPath}");
+            OpenApiDocument openApiDoc;
+            using (var stream = File.OpenRead(openApiJsonPath))
+            {
+                openApiDoc = new OpenApiStreamReader().Read(stream, out var diagnostic);
+                if (diagnostic.Errors.Count > 0)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("Warning: The following OpenAPI specification parsing diagnostics were reported:");
+                    foreach (var error in diagnostic.Errors)
+                    {
+                        Console.WriteLine($"- {error.Message} (at {error.Pointer})");
+                    }
+                    Console.ResetColor();
+                }
+            }
+
+            if (openApiDoc == null)
+            {
+                throw new InvalidDataException("Failed to parse the OpenAPI document. Ensure the file is a valid OpenAPI JSON spec.");
+            }
+
+            Console.WriteLine($"Generating Word document: {outputWordPath}");
+            using (var document = WordDocument.Create(outputWordPath))
+            {
+                // Document Header/Title Page info
+                var titlePara = document.AddParagraph(openApiDoc.Info?.Title ?? "API Specification");
+                titlePara.Style = WordParagraphStyle.Title;
+                titlePara.SetBold();
+                titlePara.SetFontSize(28);
+
+                var subtitlePara = document.AddParagraph($"Version {openApiDoc.Info?.Version ?? "1.0.0"}");
+                subtitlePara.Style = WordParagraphStyle.Subtitle;
+                subtitlePara.SetFontSize(14);
+                subtitlePara.SetItalic();
+
+                document.AddParagraph(); // Spacer
+
+                if (openApiDoc.Info != null && !string.IsNullOrEmpty(openApiDoc.Info.Description))
+                {
+                    var descHeader = document.AddParagraph("Overview");
+                    descHeader.Style = WordParagraphStyle.Heading1;
+                    descHeader.SetBold();
+                    document.AddParagraph(openApiDoc.Info.Description);
+                    document.AddParagraph();
+                }
+
+                // Contact Details
+                if (openApiDoc.Info?.Contact != null && 
+                    (!string.IsNullOrEmpty(openApiDoc.Info.Contact.Name) || !string.IsNullOrEmpty(openApiDoc.Info.Contact.Email)))
+                {
+                    var contactHeader = document.AddParagraph("Contact Information");
+                    contactHeader.Style = WordParagraphStyle.Heading2;
+                    contactHeader.SetBold();
+                    if (!string.IsNullOrEmpty(openApiDoc.Info.Contact.Name))
+                        document.AddParagraph($"Name: {openApiDoc.Info.Contact.Name}");
+                    if (!string.IsNullOrEmpty(openApiDoc.Info.Contact.Email))
+                        document.AddParagraph($"Email: {openApiDoc.Info.Contact.Email}");
+                    document.AddParagraph();
+                }
+
+                // Server Base URLs
+                if (openApiDoc.Servers != null && openApiDoc.Servers.Any())
+                {
+                    var serversHeader = document.AddParagraph("Base Server URLs");
+                    serversHeader.Style = WordParagraphStyle.Heading2;
+                    serversHeader.SetBold();
+                    foreach (var server in openApiDoc.Servers)
+                    {
+                        var urlPara = document.AddParagraph($"- {server.Url}");
+                        if (!string.IsNullOrEmpty(server.Description))
+                        {
+                            urlPara.AddText($" ({server.Description})").SetItalic();
+                        }
+                    }
+                    document.AddParagraph();
+                }
+
+                // Page break before detailed endpoints
+                document.AddPageBreak();
+
+                // Group endpoints by Tags
+                var tagGroups = new Dictionary<string, List<(string Path, OperationType Method, OpenApiOperation Operation)>>();
+
+                if (openApiDoc.Paths != null)
+                {
+                    foreach (var path in openApiDoc.Paths)
+                    {
+                        if (path.Value?.Operations == null) continue;
+
+                        foreach (var operation in path.Value.Operations)
+                        {
+                            var tags = operation.Value.Tags;
+                            if (tags != null && tags.Any())
+                            {
+                                foreach (var tag in tags)
+                                {
+                                    if (string.IsNullOrEmpty(tag?.Name)) continue;
+                                    if (!tagGroups.ContainsKey(tag.Name))
+                                    {
+                                        tagGroups[tag.Name] = new List<(string, OperationType, OpenApiOperation)>();
+                                    }
+                                    tagGroups[tag.Name].Add((path.Key, operation.Key, operation.Value));
+                                }
+                            }
+                            else
+                            {
+                                const string noTagKey = "General Services";
+                                if (!tagGroups.ContainsKey(noTagKey))
+                                {
+                                    tagGroups[noTagKey] = new List<(string, OperationType, OpenApiOperation)>();
+                                }
+                                tagGroups[noTagKey].Add((path.Key, operation.Key, operation.Value));
+                            }
+                        }
+                    }
+                }
+
+                if (tagGroups.Count == 0)
+                {
+                    var emptyPara = document.AddParagraph("No API endpoints or operations found in the specification.");
+                    emptyPara.SetItalic();
+                }
+                else
+                {
+                    var tocHeader = document.AddParagraph("Detailed Functional Endpoints");
+                    tocHeader.Style = WordParagraphStyle.Heading1;
+                    tocHeader.SetBold();
+                    document.AddParagraph();
+
+                    foreach (var group in tagGroups.OrderBy(g => g.Key))
+                    {
+                        var tagName = group.Key;
+                        var operations = group.Value;
+
+                        // Section for Tag
+                        var groupHeader = document.AddParagraph(tagName);
+                        groupHeader.Style = WordParagraphStyle.Heading1;
+                        groupHeader.SetBold();
+
+                        var tagObj = openApiDoc.Tags?.FirstOrDefault(t => string.Equals(t?.Name, tagName, StringComparison.OrdinalIgnoreCase));
+                        if (tagObj != null && !string.IsNullOrEmpty(tagObj.Description))
+                        {
+                            document.AddParagraph(tagObj.Description).SetItalic();
+                        }
+
+                        document.AddParagraph(); // spacing
+
+                        foreach (var opInfo in operations.OrderBy(o => o.Path).ThenBy(o => o.Method))
+                        {
+                            var path = opInfo.Path;
+                            var method = opInfo.Method;
+                            var op = opInfo.Operation;
+
+                            // Title of operation
+                            string headingText = !string.IsNullOrEmpty(op.Summary) ? op.Summary : $"{method.ToString().ToUpper()} {path}";
+                            var opHeader = document.AddParagraph(headingText);
+                            opHeader.Style = WordParagraphStyle.Heading2;
+                            opHeader.SetBold();
+
+                            // Path and method info
+                            var pathPara = document.AddParagraph();
+                            var methodRun = pathPara.AddText($"[{method.ToString().ToUpper()}] ");
+                            methodRun.SetBold();
+                            methodRun.Color = GetMethodColor(method);
+                            var pathRun = pathPara.AddText(path);
+                            pathRun.SetBold();
+
+                            // Description
+                            if (!string.IsNullOrEmpty(op.Description))
+                            {
+                                document.AddParagraph(op.Description);
+                            }
+                            else if (string.IsNullOrEmpty(op.Summary))
+                            {
+                                document.AddParagraph("No description provided for this endpoint.");
+                            }
+                            document.AddParagraph();
+
+                            // Parameters Table
+                            var allParams = op.Parameters;
+                            if (allParams != null && allParams.Any())
+                            {
+                                var subH = document.AddParagraph("Input Parameters");
+                                subH.Style = WordParagraphStyle.Heading3;
+                                subH.SetBold();
+
+                                var paramTable = document.AddTable(allParams.Count + 1, 5, WordTableStyle.GridTable4Accent1);
+
+                                // Headers
+                                paramTable.Rows[0].Cells[0].Paragraphs[0].Text = "Parameter";
+                                paramTable.Rows[0].Cells[0].Paragraphs[0].SetBold();
+                                paramTable.Rows[0].Cells[1].Paragraphs[0].Text = "Location";
+                                paramTable.Rows[0].Cells[1].Paragraphs[0].SetBold();
+                                paramTable.Rows[0].Cells[2].Paragraphs[0].Text = "Type";
+                                paramTable.Rows[0].Cells[2].Paragraphs[0].SetBold();
+                                paramTable.Rows[0].Cells[3].Paragraphs[0].Text = "Required";
+                                paramTable.Rows[0].Cells[3].Paragraphs[0].SetBold();
+                                paramTable.Rows[0].Cells[4].Paragraphs[0].Text = "Description";
+                                paramTable.Rows[0].Cells[4].Paragraphs[0].SetBold();
+
+                                for (int i = 0; i < allParams.Count; i++)
+                                {
+                                    var param = allParams[i];
+                                    var row = paramTable.Rows[i + 1];
+
+                                    row.Cells[0].Paragraphs[0].Text = param.Name ?? "";
+                                    row.Cells[0].Paragraphs[0].SetBold();
+
+                                    row.Cells[1].Paragraphs[0].Text = param.In?.ToString() ?? "Query";
+                                    row.Cells[2].Paragraphs[0].Text = GetSchemaTypeString(param.Schema);
+                                    
+                                    row.Cells[3].Paragraphs[0].Text = param.Required ? "Yes" : "No";
+                                    if (param.Required)
+                                    {
+                                        row.Cells[3].Paragraphs[0].SetBold();
+                                        row.Cells[3].Paragraphs[0].Color = OfficeColor.Red;
+                                    }
+
+                                    row.Cells[4].Paragraphs[0].Text = param.Description ?? "";
+                                }
+                                document.AddParagraph();
+                            }
+
+                            // Request Body Table
+                            if (op.RequestBody != null)
+                            {
+                                var subH = document.AddParagraph("Request Body");
+                                subH.Style = WordParagraphStyle.Heading3;
+                                subH.SetBold();
+
+                                if (!string.IsNullOrEmpty(op.RequestBody.Description))
+                                {
+                                    document.AddParagraph(op.RequestBody.Description);
+                                }
+
+                                var content = op.RequestBody.Content;
+                                if (content != null && content.Any())
+                                {
+                                    var firstContent = content.FirstOrDefault();
+                                    document.AddParagraph($"Format: {firstContent.Key}").SetItalic();
+
+                                    var schema = firstContent.Value?.Schema;
+                                    if (schema != null)
+                                    {
+                                        var propsList = FlattenProperties(schema);
+                                        if (propsList.Any())
+                                        {
+                                            var bodyTable = document.AddTable(propsList.Count + 1, 4, WordTableStyle.GridTable4Accent1);
+
+                                            bodyTable.Rows[0].Cells[0].Paragraphs[0].Text = "Property";
+                                            bodyTable.Rows[0].Cells[0].Paragraphs[0].SetBold();
+                                            bodyTable.Rows[0].Cells[1].Paragraphs[0].Text = "Type";
+                                            bodyTable.Rows[0].Cells[1].Paragraphs[0].SetBold();
+                                            bodyTable.Rows[0].Cells[2].Paragraphs[0].Text = "Required";
+                                            bodyTable.Rows[0].Cells[2].Paragraphs[0].SetBold();
+                                            bodyTable.Rows[0].Cells[3].Paragraphs[0].Text = "Description";
+                                            bodyTable.Rows[0].Cells[3].Paragraphs[0].SetBold();
+
+                                            for (int i = 0; i < propsList.Count; i++)
+                                            {
+                                                var prop = propsList[i];
+                                                var row = bodyTable.Rows[i + 1];
+
+                                                row.Cells[0].Paragraphs[0].Text = prop.Name;
+                                                row.Cells[0].Paragraphs[0].SetBold();
+
+                                                row.Cells[1].Paragraphs[0].Text = prop.Type;
+                                                row.Cells[2].Paragraphs[0].Text = prop.Required ? "Yes" : "No";
+                                                if (prop.Required)
+                                                {
+                                                    row.Cells[2].Paragraphs[0].SetBold();
+                                                    row.Cells[2].Paragraphs[0].Color = OfficeColor.Red;
+                                                }
+                                                row.Cells[3].Paragraphs[0].Text = prop.Description;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            document.AddParagraph($"Expected Data Type: {GetSchemaTypeString(schema)}");
+                                        }
+                                    }
+                                }
+                                document.AddParagraph();
+                            }
+
+                            // Responses Table
+                            if (op.Responses != null && op.Responses.Any())
+                            {
+                                var subH = document.AddParagraph("Responses");
+                                subH.Style = WordParagraphStyle.Heading3;
+                                subH.SetBold();
+
+                                var responseTable = document.AddTable(op.Responses.Count + 1, 3, WordTableStyle.GridTable4Accent1);
+
+                                responseTable.Rows[0].Cells[0].Paragraphs[0].Text = "Status Code";
+                                responseTable.Rows[0].Cells[0].Paragraphs[0].SetBold();
+                                responseTable.Rows[0].Cells[1].Paragraphs[0].Text = "Description";
+                                responseTable.Rows[0].Cells[1].Paragraphs[0].SetBold();
+                                responseTable.Rows[0].Cells[2].Paragraphs[0].Text = "Response Data";
+                                responseTable.Rows[0].Cells[2].Paragraphs[0].SetBold();
+
+                                int idx = 0;
+                                foreach (var resp in op.Responses.OrderBy(r => r.Key))
+                                {
+                                    var row = responseTable.Rows[idx + 1];
+                                    
+                                    row.Cells[0].Paragraphs[0].Text = resp.Key;
+                                    row.Cells[0].Paragraphs[0].SetBold();
+
+                                    if (resp.Key.StartsWith("2"))
+                                    {
+                                        row.Cells[0].Paragraphs[0].Color = OfficeColor.Green;
+                                    }
+                                    else if (resp.Key.StartsWith("4") || resp.Key.StartsWith("5"))
+                                    {
+                                        row.Cells[0].Paragraphs[0].Color = OfficeColor.Red;
+                                    }
+
+                                    row.Cells[1].Paragraphs[0].Text = resp.Value?.Description ?? "";
+
+                                    var responseContent = resp.Value?.Content;
+                                    if (responseContent != null && responseContent.Any())
+                                    {
+                                        var firstRespContent = responseContent.FirstOrDefault();
+                                        var respSchema = firstRespContent.Value?.Schema;
+                                        if (respSchema != null)
+                                        {
+                                            row.Cells[2].Paragraphs[0].Text = GetSchemaTypeString(respSchema);
+                                        }
+                                        else
+                                        {
+                                            row.Cells[2].Paragraphs[0].Text = "None";
+                                        }
+                                    }
+                                    else
+                                    {
+                                        row.Cells[2].Paragraphs[0].Text = "None";
+                                    }
+                                    idx++;
+                                }
+                                document.AddParagraph();
+                            }
+
+                            // Divider
+                            var divider = document.AddParagraph("________________________________________________");
+                            divider.ParagraphAlignment = JustificationValues.Center;
+                            divider.Color = OfficeColor.LightGray;
+                            document.AddParagraph();
+                        }
+                    }
+                }
+
+                document.Save();
+            }
+            Console.WriteLine("Word document successfully created!");
+        }
+
+        private static OfficeColor GetMethodColor(OperationType method)
+        {
+            switch (method)
+            {
+                case OperationType.Get:
+                    return OfficeColor.Blue;
+                case OperationType.Post:
+                    return OfficeColor.Green;
+                case OperationType.Put:
+                    return OfficeColor.Orange;
+                case OperationType.Delete:
+                    return OfficeColor.Red;
+                default:
+                    return OfficeColor.Black;
+            }
+        }
+
+        private static string GetSchemaTypeString(OpenApiSchema schema)
+        {
+            if (schema == null) return "any";
+
+            if (!string.IsNullOrEmpty(schema.Reference?.Id))
+            {
+                return schema.Reference.Id;
+            }
+
+            if (schema.Type == "array")
+            {
+                var itemType = GetSchemaTypeString(schema.Items);
+                return $"List of {itemType}";
+            }
+
+            if (!string.IsNullOrEmpty(schema.Format))
+            {
+                return $"{schema.Type} ({schema.Format})";
+            }
+
+            return schema.Type ?? "object";
+        }
+
+        private static List<FlatProperty> FlattenProperties(OpenApiSchema schema, string prefix = "", int depth = 0, HashSet<OpenApiSchema> visited = null)
+        {
+            var list = new List<FlatProperty>();
+            if (schema == null || depth > 3) return list;
+
+            visited ??= new HashSet<OpenApiSchema>();
+            if (visited.Contains(schema)) return list;
+            visited.Add(schema);
+
+            if (schema.Properties != null && schema.Properties.Any())
+            {
+                foreach (var prop in schema.Properties)
+                {
+                    var propName = string.IsNullOrEmpty(prefix) ? prop.Key : $"{prefix}.{prop.Key}";
+                    var isRequired = schema.Required != null && schema.Required.Contains(prop.Key);
+                    var propType = GetSchemaTypeString(prop.Value);
+
+                    list.Add(new FlatProperty
+                    {
+                        Name = propName,
+                        Type = propType,
+                        Required = isRequired,
+                        Description = prop.Value.Description ?? ""
+                    });
+
+                    if (prop.Value.Type == "object")
+                    {
+                        list.AddRange(FlattenProperties(prop.Value, propName, depth + 1, visited));
+                    }
+                    else if (prop.Value.Type == "array" && prop.Value.Items?.Type == "object")
+                    {
+                        list.AddRange(FlattenProperties(prop.Value.Items, $"{propName}[]", depth + 1, visited));
+                    }
+                }
+            }
+
+            visited.Remove(schema);
+            return list;
+        }
+    }
+}
