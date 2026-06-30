@@ -2,7 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using Microsoft.OpenApi;
 using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi.Models.Interfaces;
+using Microsoft.OpenApi.Models.References;
 using Microsoft.OpenApi.Readers;
 using OfficeIMO.Word;
 using OfficeIMO.Drawing;
@@ -28,11 +32,16 @@ namespace OpenAPIToDocConsole
             }
 
             Console.WriteLine($"Reading and parsing OpenAPI specification from: {openApiJsonPath}");
-            OpenApiDocument openApiDoc;
+            OpenApiDocument? openApiDoc = null;
             using (var stream = File.OpenRead(openApiJsonPath))
+            using (var ms = new MemoryStream())
             {
-                openApiDoc = new OpenApiStreamReader().Read(stream, out var diagnostic);
-                if (diagnostic.Errors.Count > 0)
+                stream.CopyTo(ms);
+                ms.Position = 0;
+                var readResult = OpenApiDocument.Load(ms);
+                openApiDoc = readResult.Document;
+                var diagnostic = readResult.Diagnostic;
+                if (diagnostic != null && diagnostic.Errors.Count > 0)
                 {
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.WriteLine("Warning: The following OpenAPI specification parsing diagnostics were reported:");
@@ -107,7 +116,7 @@ namespace OpenAPIToDocConsole
                 document.AddPageBreak();
 
                 // Group endpoints by Tags
-                var tagGroups = new Dictionary<string, List<(string Path, OperationType Method, OpenApiOperation Operation)>>();
+                var tagGroups = new Dictionary<string, List<(string Path, HttpMethod Method, OpenApiOperation Operation)>>();
 
                 if (openApiDoc.Paths != null)
                 {
@@ -125,7 +134,7 @@ namespace OpenAPIToDocConsole
                                     if (string.IsNullOrEmpty(tag?.Name)) continue;
                                     if (!tagGroups.ContainsKey(tag.Name))
                                     {
-                                        tagGroups[tag.Name] = new List<(string, OperationType, OpenApiOperation)>();
+                                        tagGroups[tag.Name] = new List<(string, HttpMethod, OpenApiOperation)>();
                                     }
                                     tagGroups[tag.Name].Add((path.Key, operation.Key, operation.Value));
                                 }
@@ -135,7 +144,7 @@ namespace OpenAPIToDocConsole
                                 const string noTagKey = "General Services";
                                 if (!tagGroups.ContainsKey(noTagKey))
                                 {
-                                    tagGroups[noTagKey] = new List<(string, OperationType, OpenApiOperation)>();
+                                    tagGroups[noTagKey] = new List<(string, HttpMethod, OpenApiOperation)>();
                                 }
                                 tagGroups[noTagKey].Add((path.Key, operation.Key, operation.Value));
                             }
@@ -173,7 +182,7 @@ namespace OpenAPIToDocConsole
 
                         document.AddParagraph(); // spacing
 
-                        foreach (var opInfo in operations.OrderBy(o => o.Path).ThenBy(o => o.Method))
+                        foreach (var opInfo in operations.OrderBy(o => o.Path).ThenBy(o => o.Method.Method))
                         {
                             var path = opInfo.Path;
                             var method = opInfo.Method;
@@ -383,33 +392,34 @@ namespace OpenAPIToDocConsole
             Console.WriteLine("Word document successfully created!");
         }
 
-        private static OfficeColor GetMethodColor(OperationType method)
+        private static OfficeColor GetMethodColor(HttpMethod method)
         {
-            switch (method)
+            var m = method.Method.ToUpperInvariant();
+            switch (m)
             {
-                case OperationType.Get:
+                case "GET":
                     return OfficeColor.Blue;
-                case OperationType.Post:
+                case "POST":
                     return OfficeColor.Green;
-                case OperationType.Put:
+                case "PUT":
                     return OfficeColor.Orange;
-                case OperationType.Delete:
+                case "DELETE":
                     return OfficeColor.Red;
                 default:
                     return OfficeColor.Black;
             }
         }
 
-        private static string GetSchemaTypeString(OpenApiSchema schema)
+        private static string GetSchemaTypeString(IOpenApiSchema? schema)
         {
             if (schema == null) return "any";
 
-            if (!string.IsNullOrEmpty(schema.Reference?.Id))
+            if (schema is OpenApiSchemaReference schemaReference && schemaReference.Reference != null)
             {
-                return schema.Reference.Id;
+                return schemaReference.Reference.Id ?? "any";
             }
 
-            if (schema.Type == "array")
+            if (schema.Type == JsonSchemaType.Array)
             {
                 var itemType = GetSchemaTypeString(schema.Items);
                 return $"List of {itemType}";
@@ -417,18 +427,18 @@ namespace OpenAPIToDocConsole
 
             if (!string.IsNullOrEmpty(schema.Format))
             {
-                return $"{schema.Type} ({schema.Format})";
+                return $"{schema.Type?.ToString().ToLowerInvariant()} ({schema.Format})";
             }
 
-            return schema.Type ?? "object";
+            return schema.Type?.ToString().ToLowerInvariant() ?? "object";
         }
 
-        private static List<FlatProperty> FlattenProperties(OpenApiSchema schema, string prefix = "", int depth = 0, HashSet<OpenApiSchema>? visited = null)
+        private static List<FlatProperty> FlattenProperties(IOpenApiSchema schema, string prefix = "", int depth = 0, HashSet<IOpenApiSchema>? visited = null)
         {
             var list = new List<FlatProperty>();
             if (schema == null || depth > 3) return list;
 
-            visited ??= new HashSet<OpenApiSchema>();
+            visited ??= new HashSet<IOpenApiSchema>();
             if (visited.Contains(schema)) return list;
             visited.Add(schema);
 
@@ -448,11 +458,11 @@ namespace OpenAPIToDocConsole
                         Description = prop.Value.Description ?? ""
                     });
 
-                    if (prop.Value.Type == "object")
+                    if (prop.Value.Type == JsonSchemaType.Object)
                     {
                         list.AddRange(FlattenProperties(prop.Value, propName, depth + 1, visited));
                     }
-                    else if (prop.Value.Type == "array" && prop.Value.Items?.Type == "object")
+                    else if (prop.Value.Type == JsonSchemaType.Array && prop.Value.Items?.Type == JsonSchemaType.Object)
                     {
                         list.AddRange(FlattenProperties(prop.Value.Items, $"{propName}[]", depth + 1, visited));
                     }

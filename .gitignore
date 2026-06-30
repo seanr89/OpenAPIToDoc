@@ -55,3 +55,7 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+src/.DS_Store
+src/spec-api/openapi.json
+src/specs/openapi.json
+src/output/output.docx
