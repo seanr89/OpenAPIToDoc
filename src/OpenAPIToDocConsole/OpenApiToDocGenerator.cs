@@ -24,7 +24,16 @@ namespace OpenAPIToDocConsole
             public string Description { get; set; } = "";
         }
 
-        public static void GenerateWordDoc(string openApiJsonPath, string outputWordPath)
+        private static string SanitizeFileName(string fileName)
+        {
+            foreach (char c in Path.GetInvalidFileNameChars())
+            {
+                fileName = fileName.Replace(c, '_');
+            }
+            return fileName;
+        }
+
+        public static string GenerateWordDoc(string openApiJsonPath, string? outputWordPath = null)
         {
             if (!File.Exists(openApiJsonPath))
             {
@@ -58,8 +67,27 @@ namespace OpenAPIToDocConsole
                 throw new InvalidDataException("Failed to parse the OpenAPI document. Ensure the file is a valid OpenAPI JSON spec.");
             }
 
-            Console.WriteLine($"Generating Word document: {outputWordPath}");
-            using (var document = WordDocument.Create(outputWordPath))
+            string actualOutputPath;
+            string title = openApiDoc.Info?.Title ?? "API_Specification";
+            string version = openApiDoc.Info?.Version ?? "1.0.0";
+            string defaultFileName = SanitizeFileName($"{title}_{version}.docx");
+
+            if (string.IsNullOrEmpty(outputWordPath))
+            {
+                string directory = Path.GetDirectoryName(openApiJsonPath) ?? "";
+                actualOutputPath = Path.Combine(directory, defaultFileName);
+            }
+            else if (Directory.Exists(outputWordPath))
+            {
+                actualOutputPath = Path.Combine(outputWordPath, defaultFileName);
+            }
+            else
+            {
+                actualOutputPath = outputWordPath;
+            }
+
+            Console.WriteLine($"Generating Word document: {actualOutputPath}");
+            using (var document = WordDocument.Create(actualOutputPath))
             {
                 // Document Header/Title Page info
                 var titlePara = document.AddParagraph(openApiDoc.Info?.Title ?? "API Specification");
@@ -390,6 +418,7 @@ namespace OpenAPIToDocConsole
                 document.Save();
             }
             Console.WriteLine("Word document successfully created!");
+            return actualOutputPath;
         }
 
         private static OfficeColor GetMethodColor(HttpMethod method)

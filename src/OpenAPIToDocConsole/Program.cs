@@ -45,21 +45,13 @@ namespace OpenAPIToDocConsole
                 return;
             }
 
-            if (string.IsNullOrEmpty(outputPath))
-            {
-                // Default output path in the same folder with .docx extension
-                string directory = Path.GetDirectoryName(inputPath) ?? "";
-                string fileNameWithoutExt = Path.GetFileNameWithoutExtension(inputPath);
-                outputPath = Path.Combine(directory, $"{fileNameWithoutExt}.docx");
-            }
-
             try
             {
-                OpenApiToDocGenerator.GenerateWordDoc(inputPath, outputPath);
+                string actualOutputPath = OpenApiToDocGenerator.GenerateWordDoc(inputPath, outputPath);
                 
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine("\nSuccess!");
-                Console.WriteLine($"Word document created at: {Path.GetFullPath(outputPath)}");
+                Console.WriteLine($"Word document created at: {Path.GetFullPath(actualOutputPath)}");
                 Console.ResetColor();
             }
             catch (Exception ex)
