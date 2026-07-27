@@ -63,12 +63,53 @@ Building the `spec-api` project automatically regenerates the `openapi.json` fil
 
 ## How to Run
 
+This repository consists of two main projects: the reference API (`spec-api`) and the generator console application (`OpenAPIToDocConsole`).
+
+### 1. Reference Web API (`spec-api`)
+
+The `spec-api` project is a sample ASP.NET Core application configured with native .NET OpenAPI document generation.
+
+#### Run the Web API locally:
+Navigate to the `spec-api` project directory and run it:
+```bash
+cd src/spec-api
+dotnet run
+```
+Once started, the API will be available at:
+* **HTTP**: `http://localhost:5016`
+* **HTTPS**: `https://localhost:7110`
+
+When running in the `Development` environment, you can access the dynamically generated OpenAPI specification document in your browser at:
+* `http://localhost:5016/openapi/v1.json`
+
+#### Using the Makefile:
+For convenience, a `Makefile` is provided in the `src/spec-api` directory:
+- **Build the API**:
+  ```bash
+  make build
+  ```
+- **Generate `openapi.json` without running the application**:
+  ```bash
+  make openapi
+  ```
+  *(This compiles the app in Release configuration and extracts the OpenAPI JSON document directly using `Microsoft.Extensions.ApiDescription.Server` into `src/spec-api/openapi.json`)*
+- **Clean build artifacts**:
+  ```bash
+  make clean
+  ```
+
+---
+
+### 2. Generator CLI (`OpenAPIToDocConsole`)
+
+The generator CLI parses an OpenAPI JSON file and outputs a formatted Word document (`.docx`).
+
 Navigate to the generator CLI directory:
 ```bash
 cd src/OpenAPIToDocConsole
 ```
 
-### Option A: Command Line Mode
+#### Option A: Command Line Mode
 Pass the input OpenAPI JSON file path and optionally the output Word document path or directory:
 ```bash
 dotnet run -- "/path/to/openapi.json" "/path/to/output_or_directory"
@@ -77,8 +118,13 @@ dotnet run -- "/path/to/openapi.json" "/path/to/output_or_directory"
 * **If the output path is a directory**: The `.docx` file is saved inside that directory using the `<Title>_<Version>.docx` naming convention.
 * **If the output path is a file path**: The file is created exactly at that path.
 
-### Option B: Interactive Mode
-Run without arguments and the console will prompt you to enter the path:
+*Example (running against the generated spec-api JSON)*:
+```bash
+dotnet run -- "../spec-api/openapi.json"
+```
+
+#### Option B: Interactive Mode
+Run without arguments, and the console will prompt you to enter the path to your OpenAPI JSON file:
 ```bash
 dotnet run
 ```
