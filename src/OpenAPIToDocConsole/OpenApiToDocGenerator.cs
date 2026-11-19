@@ -16,7 +16,7 @@ namespace OpenAPIToDocConsole
 {
     public static class OpenApiToDocGenerator
     {
-        private class FlatProperty
+        internal class FlatProperty
         {
             public string Name { get; set; } = "";
             public string Type { get; set; } = "";
@@ -24,7 +24,7 @@ namespace OpenAPIToDocConsole
             public string Description { get; set; } = "";
         }
 
-        private static string SanitizeFileName(string fileName)
+        internal static string SanitizeFileName(string fileName)
         {
             foreach (char c in Path.GetInvalidFileNameChars())
             {
@@ -421,7 +421,7 @@ namespace OpenAPIToDocConsole
             return actualOutputPath;
         }
 
-        private static OfficeColor GetMethodColor(HttpMethod method)
+        internal static OfficeColor GetMethodColor(HttpMethod method)
         {
             var m = method.Method.ToUpperInvariant();
             switch (m)
@@ -439,7 +439,7 @@ namespace OpenAPIToDocConsole
             }
         }
 
-        private static string GetSchemaTypeString(IOpenApiSchema? schema)
+        internal static string GetSchemaTypeString(IOpenApiSchema? schema)
         {
             if (schema == null) return "any";
 
@@ -462,7 +462,7 @@ namespace OpenAPIToDocConsole
             return schema.Type?.ToString().ToLowerInvariant() ?? "object";
         }
 
-        private static List<FlatProperty> FlattenProperties(IOpenApiSchema schema, string prefix = "", int depth = 0, HashSet<IOpenApiSchema>? visited = null)
+        internal static List<FlatProperty> FlattenProperties(IOpenApiSchema schema, string prefix = "", int depth = 0, HashSet<IOpenApiSchema>? visited = null)
         {
             var list = new List<FlatProperty>();
             if (schema == null || depth > 3) return list;
