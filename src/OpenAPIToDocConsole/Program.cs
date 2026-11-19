@@ -7,9 +7,14 @@ namespace OpenAPIToDocConsole
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("==============================================");
-            Console.WriteLine("        OpenAPI Specification to Word Doc      ");
-            Console.WriteLine("==============================================");
+            Run(args, Console.In, Console.Out);
+        }
+
+        internal static void Run(string[] args, TextReader input, TextWriter output)
+        {
+            output.WriteLine("==============================================");
+            output.WriteLine("        OpenAPI Specification to Word Doc      ");
+            output.WriteLine("==============================================");
 
             string? inputPath = null;
             string? outputPath = null;
@@ -25,14 +30,14 @@ namespace OpenAPIToDocConsole
             else
             {
                 // Interactive Mode
-                Console.Write("Enter the path to the OpenAPI JSON file: ");
-                inputPath = Console.ReadLine()?.Trim(' ', '"'); // Trim spaces and quotes
+                output.Write("Enter the path to the OpenAPI JSON file: ");
+                inputPath = input.ReadLine()?.Trim(' ', '"'); // Trim spaces and quotes
             }
 
             if (string.IsNullOrEmpty(inputPath))
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Error: Input path cannot be empty.");
+                output.WriteLine("Error: Input path cannot be empty.");
                 Console.ResetColor();
                 return;
             }
@@ -40,7 +45,7 @@ namespace OpenAPIToDocConsole
             if (!File.Exists(inputPath))
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Error: File not found at '{inputPath}'.");
+                output.WriteLine($"Error: File not found at '{inputPath}'.");
                 Console.ResetColor();
                 return;
             }
@@ -50,15 +55,15 @@ namespace OpenAPIToDocConsole
                 string actualOutputPath = OpenApiToDocGenerator.GenerateWordDoc(inputPath, outputPath);
                 
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("\nSuccess!");
-                Console.WriteLine($"Word document created at: {Path.GetFullPath(actualOutputPath)}");
+                output.WriteLine("\nSuccess!");
+                output.WriteLine($"Word document created at: {Path.GetFullPath(actualOutputPath)}");
                 Console.ResetColor();
             }
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"\nAn error occurred during generation: {ex.Message}");
-                Console.WriteLine(ex.StackTrace);
+                output.WriteLine($"\nAn error occurred during generation: {ex.Message}");
+                output.WriteLine(ex.StackTrace);
                 Console.ResetColor();
             }
         }
